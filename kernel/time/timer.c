@@ -55,6 +55,22 @@
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/timer.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/timer.h>
+
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+#include <linux/hrtimer.h>
+#define USLEEP_RANGE_HIS_ARRAY_SIZE (50)
+#define USLEEP_RANGE_HIS_RECORD_CNT (400)
+struct arch_timer_caller_history_struct
+	usleep_range_history[USLEEP_RANGE_HIS_ARRAY_SIZE];
+static uint64_t usleep_range_count;
+static DEFINE_SPINLOCK(usleep_range_lock);
+#endif
+
+
+EXPORT_TRACEPOINT_SYMBOL_GPL(hrtimer_expire_entry);
+EXPORT_TRACEPOINT_SYMBOL_GPL(hrtimer_expire_exit);
 
 __visible u64 jiffies_64 __cacheline_aligned_in_smp = INITIAL_JIFFIES;
 
@@ -207,6 +223,7 @@ struct timer_base {
 	unsigned int		cpu;
 	bool			next_expiry_recalc;
 	bool			is_idle;
+	bool			timers_pending;
 	DECLARE_BITMAP(pending_map, WHEEL_SIZE);
 	struct hlist_head	vectors[WHEEL_SIZE];
 } ____cacheline_aligned;
@@ -501,6 +518,7 @@ static inline unsigned calc_index(unsigned long expires, unsigned lvl,
 	 *
 	 * Round up with level granularity to prevent this.
 	 */
+	trace_android_vh_timer_calc_index(lvl, &expires);
 	expires = (expires + LVL_GRAN(lvl)) >> LVL_SHIFT(lvl);
 	*bucket_expiry = expires << LVL_SHIFT(lvl);
 	return LVL_OFFS(lvl) + (expires & LVL_MASK);
@@ -595,6 +613,7 @@ static void enqueue_timer(struct timer_base *base, struct timer_list *timer,
 		 * can reevaluate the wheel:
 		 */
 		base->next_expiry = bucket_expiry;
+		base->timers_pending = true;
 		base->next_expiry_recalc = false;
 		trigger_dyntick_cpu(base, timer);
 	}
@@ -1263,8 +1282,10 @@ static inline void timer_base_unlock_expiry(struct timer_base *base)
 static void timer_sync_wait_running(struct timer_base *base)
 {
 	if (atomic_read(&base->timer_waiters)) {
+		raw_spin_unlock_irq(&base->lock);
 		spin_unlock(&base->expiry_lock);
 		spin_lock(&base->expiry_lock);
+		raw_spin_lock_irq(&base->lock);
 	}
 }
 
@@ -1448,14 +1469,14 @@ static void expire_timers(struct timer_base *base, struct hlist_head *head)
 		if (timer->flags & TIMER_IRQSAFE) {
 			raw_spin_unlock(&base->lock);
 			call_timer_fn(timer, fn, baseclk);
-			base->running_timer = NULL;
 			raw_spin_lock(&base->lock);
+			base->running_timer = NULL;
 		} else {
 			raw_spin_unlock_irq(&base->lock);
 			call_timer_fn(timer, fn, baseclk);
+			raw_spin_lock_irq(&base->lock);
 			base->running_timer = NULL;
 			timer_sync_wait_running(base);
-			raw_spin_lock_irq(&base->lock);
 		}
 	}
 }
@@ -1575,6 +1596,7 @@ static unsigned long __next_timer_interrupt(struct timer_base *base)
 	}
 
 	base->next_expiry_recalc = false;
+	base->timers_pending = !(next == base->clk + NEXT_TIMER_MAX_DELTA);
 
 	return next;
 }
@@ -1626,7 +1648,6 @@ u64 get_next_timer_interrupt(unsigned long basej, u64 basem)
 	struct timer_base *base = this_cpu_ptr(&timer_bases[BASE_STD]);
 	u64 expires = KTIME_MAX;
 	unsigned long nextevt;
-	bool is_max_delta;
 
 	/*
 	 * Pretend that there is no timer pending if the cpu is offline.
@@ -1639,7 +1660,6 @@ u64 get_next_timer_interrupt(unsigned long basej, u64 basem)
 	if (base->next_expiry_recalc)
 		base->next_expiry = __next_timer_interrupt(base);
 	nextevt = base->next_expiry;
-	is_max_delta = (nextevt == base->clk + NEXT_TIMER_MAX_DELTA);
 
 	/*
 	 * We have a fresh next event. Check whether we can forward the
@@ -1657,7 +1677,7 @@ u64 get_next_timer_interrupt(unsigned long basej, u64 basem)
 		expires = basem;
 		base->is_idle = false;
 	} else {
-		if (!is_max_delta)
+		if (base->timers_pending)
 			expires = basem + (u64)(nextevt - basej) * TICK_NSEC;
 		/*
 		 * If we expect to sleep more than a tick, mark the base idle.
@@ -1700,6 +1720,9 @@ void timer_clear_idle(void)
 void update_process_times(int user_tick)
 {
 	struct task_struct *p = current;
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	u64 start, end, process_time;
+#endif
 
 	PRANDOM_ADD_NOISE(jiffies, user_tick, p, 0);
 
@@ -1711,7 +1734,17 @@ void update_process_times(int user_tick)
 	if (in_irq())
 		irq_work_tick();
 #endif
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	start = sched_clock();
+#endif
 	scheduler_tick();
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	end = sched_clock();
+	process_time = end - start;
+	if (process_time > 5000000L) // > 5ms
+		pr_notice("irq_monitor: time: %lld func: %s line: %d "
+			, process_time, __func__, __LINE__);
+#endif
 	if (IS_ENABLED(CONFIG_POSIX_TIMERS))
 		run_posix_cpu_timers();
 }
@@ -1940,6 +1973,7 @@ int timers_prepare_cpu(unsigned int cpu)
 		base = per_cpu_ptr(&timer_bases[b], cpu);
 		base->clk = jiffies;
 		base->next_expiry = base->clk + NEXT_TIMER_MAX_DELTA;
+		base->timers_pending = false;
 		base->is_idle = false;
 	}
 	return 0;
@@ -2057,6 +2091,19 @@ void __sched usleep_range(unsigned long min, unsigned long max)
 {
 	ktime_t exp = ktime_add_us(ktime_get(), min);
 	u64 delta = (u64)(max - min) * NSEC_PER_USEC;
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+	u64 temp_count = 0;
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&usleep_range_lock, flags);
+	usleep_range_count++;
+	if ((usleep_range_count % USLEEP_RANGE_HIS_RECORD_CNT) == 0)
+		temp_count = usleep_range_count / USLEEP_RANGE_HIS_RECORD_CNT;
+	temp_count = temp_count % USLEEP_RANGE_HIS_ARRAY_SIZE;
+	usleep_range_history[temp_count].timer_caller_ip = CALLER_ADDR0;
+	usleep_range_history[temp_count].timer_called = sched_clock();
+	spin_unlock_irqrestore(&usleep_range_lock, flags);
+#endif
 
 	for (;;) {
 		__set_current_state(TASK_UNINTERRUPTIBLE);
@@ -2066,3 +2113,19 @@ void __sched usleep_range(unsigned long min, unsigned long max)
 	}
 }
 EXPORT_SYMBOL(usleep_range);
+
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+void dump_arch_timer_burst_history(void)
+{
+	int i;
+	unsigned long flags = 0;
+
+	spin_lock_irqsave(&usleep_range_lock, flags);
+	for (i = 0; i < USLEEP_RANGE_HIS_ARRAY_SIZE; i++)
+		pr_info("usleep_range_history[%d].caller %pS, call time: %lld",
+			i, usleep_range_history[i].timer_caller_ip,
+			usleep_range_history[i].timer_called);
+	spin_unlock_irqrestore(&usleep_range_lock, flags);
+}
+EXPORT_SYMBOL(dump_arch_timer_burst_history);
+#endif

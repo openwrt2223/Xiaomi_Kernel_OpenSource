@@ -20,6 +20,7 @@
 #include <linux/seqlock.h>
 #include <linux/timer.h>
 #include <linux/timerqueue.h>
+#include <linux/android_kabi.h>
 
 struct hrtimer_clock_base;
 struct hrtimer_cpu_base;
@@ -124,6 +125,8 @@ struct hrtimer {
 	u8				is_rel;
 	u8				is_soft;
 	u8				is_hard;
+
+	ANDROID_KABI_RESERVE(1);
 };
 
 /**
@@ -318,15 +321,11 @@ struct clock_event_device;
 
 extern void hrtimer_interrupt(struct clock_event_device *dev);
 
-extern void clock_was_set_delayed(void);
-
 extern unsigned int hrtimer_resolution;
 
 #else
 
 #define hrtimer_resolution	(unsigned int)LOW_RES_NSEC
-
-static inline void clock_was_set_delayed(void) { }
 
 #endif
 
@@ -351,7 +350,6 @@ hrtimer_expires_remaining_adjusted(const struct hrtimer *timer)
 						    timer->base->get_time());
 }
 
-extern void clock_was_set(void);
 #ifdef CONFIG_TIMERFD
 extern void timerfd_clock_was_set(void);
 #else
@@ -534,6 +532,39 @@ int hrtimers_prepare_cpu(unsigned int cpu);
 int hrtimers_dead_cpu(unsigned int cpu);
 #else
 #define hrtimers_dead_cpu	NULL
+#endif
+
+#if IS_ENABLED(CONFIG_MTK_TICK_BROADCAST_DEBUG)
+struct tick_broadcast_history_struct {
+	unsigned long long time_enter;
+	unsigned long long time_exit;
+	int ret_enter;
+	int affin_enter_cpu;
+	int affin_handle_cpu;
+	unsigned long long handle_time;
+};
+
+extern struct tick_broadcast_history_struct tick_broadcast_history[NR_CPUS];
+
+#define BC_LOG_BUF_LEN         1024
+struct tick_broadcast_dump_buf {
+	char buf[BC_LOG_BUF_LEN];
+	char *p_idx;
+};
+
+extern struct tick_broadcast_dump_buf bc_dump_buf;
+extern struct cpumask *bc_tick_get_broadcast_oneshot_mask(void);
+extern struct cpumask *bc_tick_get_broadcast_pending_mask(void);
+extern struct cpumask *bc_tick_get_broadcast_force_mask(void);
+#endif
+
+
+#if IS_ENABLED(CONFIG_MTK_IRQ_MONITOR_DEBUG)
+struct arch_timer_caller_history_struct {
+	unsigned long timer_caller_ip;
+	u64 timer_called;
+};
+extern void dump_arch_timer_burst_history(void);
 #endif
 
 #endif

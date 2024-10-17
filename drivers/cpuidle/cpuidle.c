@@ -203,9 +203,20 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 {
 	int entered_state;
 
-	struct cpuidle_state *target_state = &drv->states[index];
-	bool broadcast = !!(target_state->flags & CPUIDLE_FLAG_TIMER_STOP);
+	struct cpuidle_state *target_state;
+	bool broadcast;
 	ktime_t time_start, time_end;
+
+	/*
+	 * The vendor hook may modify index, which means target_state and
+	 * broadcast must be assigned after the vendor hook.
+	 */
+	trace_android_vh_cpu_idle_enter(&index, dev);
+	if (index < 0)
+		return index;
+
+	target_state = &drv->states[index];
+	broadcast = !!(target_state->flags & CPUIDLE_FLAG_TIMER_STOP);
 
 	/*
 	 * Tell the time framework to switch to a broadcast timer because our
@@ -229,7 +240,6 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	/* Take note of the planned idle state. */
 	sched_idle_set_state(target_state);
 
-	trace_android_vh_cpu_idle(0, index, dev->cpu);
 	trace_cpu_idle(index, dev->cpu);
 	time_start = ns_to_ktime(local_clock());
 
@@ -244,7 +254,7 @@ int cpuidle_enter_state(struct cpuidle_device *dev, struct cpuidle_driver *drv,
 	sched_clock_idle_wakeup_event();
 	time_end = ns_to_ktime(local_clock());
 	trace_cpu_idle(PWR_EVENT_EXIT, dev->cpu);
-	trace_android_vh_cpu_idle(PWR_EVENT_EXIT, entered_state, dev->cpu);
+	trace_android_vh_cpu_idle_exit(entered_state, dev);
 
 	/* The cpu is no longer idle or about to enter idle. */
 	sched_idle_set_state(NULL);
@@ -421,7 +431,7 @@ void cpuidle_uninstall_idle_handler(void)
 {
 	if (enabled_devices) {
 		initialized = 0;
-		wake_up_all_idle_cpus();
+		wake_up_all_online_idle_cpus();
 	}
 
 	/*

@@ -31,6 +31,26 @@ TRACE_EVENT(sched_kthread_stop,
 	TP_printk("comm=%s pid=%d", __entry->comm, __entry->pid)
 );
 
+
+TRACE_EVENT(sched_setaffinity,
+
+	TP_PROTO(pid_t pid, const struct cpumask *in_mask),
+
+	TP_ARGS(pid, in_mask),
+
+	TP_STRUCT__entry(
+		__field(pid_t, pid)
+		__field(unsigned long, cpu_mask)
+	),
+
+	TP_fast_assign(
+		__entry->pid	     = pid;
+		__entry->cpu_mask  = cpumask_bits(in_mask)[0];
+	),
+
+	TP_printk(" pid=%d affine=%#lx", __entry->pid, __entry->cpu_mask)
+);
+
 /*
  * Tracepoint for the return value of the kthread stopping:
  */
@@ -198,6 +218,7 @@ TRACE_EVENT(sched_migrate_task,
 		__field(	int,	prio			)
 		__field(	int,	orig_cpu		)
 		__field(	int,	dest_cpu		)
+		__field(	int,	running			)
 	),
 
 	TP_fast_assign(
@@ -206,11 +227,13 @@ TRACE_EVENT(sched_migrate_task,
 		__entry->prio		= p->prio; /* XXX SCHED_DEADLINE */
 		__entry->orig_cpu	= task_cpu(p);
 		__entry->dest_cpu	= dest_cpu;
+		__entry->running	= (p->state == TASK_RUNNING);
 	),
 
-	TP_printk("comm=%s pid=%d prio=%d orig_cpu=%d dest_cpu=%d",
+	TP_printk("comm=%s pid=%d prio=%d orig_cpu=%d dest_cpu=%d running=%d",
 		  __entry->comm, __entry->pid, __entry->prio,
-		  __entry->orig_cpu, __entry->dest_cpu)
+		  __entry->orig_cpu, __entry->dest_cpu,
+		  __entry->running)
 );
 
 DECLARE_EVENT_CLASS(sched_process_template,

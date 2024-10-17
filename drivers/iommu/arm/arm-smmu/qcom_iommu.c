@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2013 ARM Limited
  * Copyright (C) 2017 Red Hat
+ * copyright (C) 2022 XiaoMi, Inc.
  */
 
 #include <linux/atomic.h>
@@ -81,7 +82,7 @@ static struct qcom_iommu_domain *to_qcom_iommu_domain(struct iommu_domain *dom)
 
 static const struct iommu_ops qcom_iommu_ops;
 
-static struct qcom_iommu_dev * to_iommu(struct device *dev)
+static struct qcom_iommu_dev *to_iommu(struct device *dev)
 {
 	struct iommu_fwspec *fwspec = dev_iommu_fwspec_get(dev);
 
@@ -91,7 +92,7 @@ static struct qcom_iommu_dev * to_iommu(struct device *dev)
 	return dev_iommu_priv_get(dev);
 }
 
-static struct qcom_iommu_ctx * to_ctx(struct qcom_iommu_domain *d, unsigned asid)
+static struct qcom_iommu_ctx *to_ctx(struct qcom_iommu_domain *d, unsigned asid)
 {
 	struct qcom_iommu_dev *qcom_iommu = d->iommu;
 	if (!qcom_iommu)
@@ -185,13 +186,6 @@ static void qcom_iommu_tlb_flush_walk(unsigned long iova, size_t size,
 	qcom_iommu_tlb_sync(cookie);
 }
 
-static void qcom_iommu_tlb_flush_leaf(unsigned long iova, size_t size,
-				      size_t granule, void *cookie)
-{
-	qcom_iommu_tlb_inv_range_nosync(iova, size, granule, true, cookie);
-	qcom_iommu_tlb_sync(cookie);
-}
-
 static void qcom_iommu_tlb_add_page(struct iommu_iotlb_gather *gather,
 				    unsigned long iova, size_t granule,
 				    void *cookie)
@@ -202,7 +196,6 @@ static void qcom_iommu_tlb_add_page(struct iommu_iotlb_gather *gather,
 static const struct iommu_flush_ops qcom_flush_ops = {
 	.tlb_flush_all	= qcom_iommu_tlb_inv_context,
 	.tlb_flush_walk = qcom_iommu_tlb_flush_walk,
-	.tlb_flush_leaf = qcom_iommu_tlb_flush_leaf,
 	.tlb_add_page	= qcom_iommu_tlb_add_page,
 };
 
@@ -630,7 +623,7 @@ static int qcom_iommu_sec_ptbl_init(struct device *dev)
 	void *cpu_addr;
 	dma_addr_t paddr;
 	unsigned long attrs;
-	static bool allocated = false;
+	static bool allocated;
 	int ret;
 
 	if (allocated)

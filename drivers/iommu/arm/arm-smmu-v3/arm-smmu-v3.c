@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
  * IOMMU API for ARM architected SMMUv3 implementations.
- *
+ * 
  * Copyright (C) 2015 ARM Limited
- *
+ * Copyright (C) 2022 XiaoMi, Inc.
  * Author: Will Deacon <will.deacon@arm.com>
  *
  * This driver is powered by bad coffee and bombay mix.
@@ -1741,16 +1741,9 @@ static void arm_smmu_tlb_inv_walk(unsigned long iova, size_t size,
 	arm_smmu_tlb_inv_range(iova, size, granule, false, cookie);
 }
 
-static void arm_smmu_tlb_inv_leaf(unsigned long iova, size_t size,
-				  size_t granule, void *cookie)
-{
-	arm_smmu_tlb_inv_range(iova, size, granule, true, cookie);
-}
-
 static const struct iommu_flush_ops arm_smmu_flush_ops = {
 	.tlb_flush_all	= arm_smmu_tlb_inv_context,
 	.tlb_flush_walk = arm_smmu_tlb_inv_walk,
-	.tlb_flush_leaf = arm_smmu_tlb_inv_leaf,
 	.tlb_add_page	= arm_smmu_tlb_inv_page_nosync,
 };
 
@@ -2267,7 +2260,7 @@ static void arm_smmu_iotlb_sync(struct iommu_domain *domain,
 {
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 
-	arm_smmu_tlb_inv_range(gather->start, gather->end - gather->start,
+	arm_smmu_tlb_inv_range(gather->start, gather->end - gather->start + 1,
 			       gather->pgsize, true, smmu_domain);
 }
 
@@ -2466,7 +2459,7 @@ static int arm_smmu_domain_set_attr(struct iommu_domain *domain,
 		}
 		break;
 	case IOMMU_DOMAIN_DMA:
-		switch(attr) {
+		switch (attr) {
 		case DOMAIN_ATTR_DMA_USE_FLUSH_QUEUE:
 			smmu_domain->non_strict = *(int *)data;
 			break;

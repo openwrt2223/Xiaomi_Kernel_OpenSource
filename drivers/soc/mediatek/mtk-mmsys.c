@@ -5,12 +5,11 @@
  */
 
 #include <linux/device.h>
+#include <linux/module.h>
+#include <linux/io.h>
 #include <linux/of_device.h>
 #include <linux/platform_device.h>
 #include <linux/soc/mediatek/mtk-mmsys.h>
-
-#include "../../gpu/drm/mediatek/mtk_drm_ddp.h"
-#include "../../gpu/drm/mediatek/mtk_drm_ddp_comp.h"
 
 #define DISP_REG_CONFIG_DISP_OVL0_MOUT_EN	0x040
 #define DISP_REG_CONFIG_DISP_OVL1_MOUT_EN	0x044
@@ -375,4 +374,8 @@ static struct platform_driver mtk_mmsys_drv = {
 	.probe = mtk_mmsys_probe,
 };
 
-builtin_platform_driver(mtk_mmsys_drv);
+module_platform_driver(mtk_mmsys_drv);
+
+MODULE_AUTHOR("Yongqiang Niu, MediaTek");
+MODULE_DESCRIPTION("MediaTek MMSYS Driver");
+MODULE_LICENSE("GPL v2");

@@ -692,6 +692,7 @@ config RTC_DRV_S5M
 	tristate "Samsung S2M/S5M series"
 	depends on MFD_SEC_CORE || COMPILE_TEST
 	select REGMAP_IRQ
+	select REGMAP_I2C
 	help
 	  If you say yes here you will get support for the
 	  RTC of Samsung S2MPS14 and S5M PMIC series.
@@ -1296,7 +1297,7 @@ config RTC_DRV_OPAL
 
 config RTC_DRV_ZYNQMP
 	tristate "Xilinx Zynq Ultrascale+ MPSoC RTC"
-	depends on OF
+	depends on OF && HAS_IOMEM
 	help
 	  If you say yes here you get support for the RTC controller found on
 	  Xilinx Zynq Ultrascale+ MPSoC.
@@ -1838,6 +1839,16 @@ config RTC_DRV_MT6397
 	  MediaTek(R) RTC driver.
 
 	  If you want to use MediaTek(R) RTC interface, select Y or M here.
+
+config RTC_DRV_MT6685
+	tristate "Mediatek Real Time Clock driver"
+	depends on MFD_MT6685 || (COMPILE_TEST && IRQ_DOMAIN)
+	help
+	  This selects the Mediatek(R) RTC driver. RTC is part of Mediatek
+	  MT6685. You should enable MT6685 MFD before select
+	  Mediatek(R) RTC driver.
+
+	  If you want to use Mediatek(R) RTC interface, select Y or M here.
 
 config RTC_DRV_MT7622
 	tristate "MediaTek SoC based RTC"

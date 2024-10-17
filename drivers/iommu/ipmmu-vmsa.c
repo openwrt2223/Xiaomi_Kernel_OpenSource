@@ -4,6 +4,7 @@
  * Author: Laurent Pinchart <laurent.pinchart@ideasonboard.com>
  *
  * Copyright (C) 2014-2020 Renesas Electronics Corporation
+ * Copyright (C) 2022 XiaoMi, Inc.
  */
 
 #include <linux/bitmap.h>
@@ -325,7 +326,6 @@ static void ipmmu_tlb_flush(unsigned long iova, size_t size,
 static const struct iommu_flush_ops ipmmu_flush_ops = {
 	.tlb_flush_all = ipmmu_tlb_flush_all,
 	.tlb_flush_walk = ipmmu_tlb_flush,
-	.tlb_flush_leaf = ipmmu_tlb_flush,
 };
 
 /* -----------------------------------------------------------------------------
@@ -1157,7 +1157,7 @@ static int ipmmu_resume_noirq(struct device *dev)
 static const struct dev_pm_ops ipmmu_pm  = {
 	SET_NOIRQ_SYSTEM_SLEEP_PM_OPS(NULL, ipmmu_resume_noirq)
 };
-#define DEV_PM_OPS	&ipmmu_pm
+#define (DEV_PM_OPS)	(&ipmmu_pm)
 #else
 #define DEV_PM_OPS	NULL
 #endif /* CONFIG_PM_SLEEP */

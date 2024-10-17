@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // Miscellaneous Arm SMMU implementation and integration quirks
 // Copyright (C) 2019 Arm Limited
-
+// Copyright (C) 2022 XiaoMi, Inc.
 #define pr_fmt(fmt) "arm-smmu: " fmt
 
 #include <linux/bitfield.h>
@@ -12,7 +12,7 @@
 
 static int arm_smmu_gr0_ns(int offset)
 {
-	switch(offset) {
+	switch (offset) {
 	case ARM_SMMU_GR0_sCR0:
 	case ARM_SMMU_GR0_sACR:
 	case ARM_SMMU_GR0_sGFSR:
@@ -222,6 +222,9 @@ struct arm_smmu_device *arm_smmu_impl_init(struct arm_smmu_device *smmu)
 	    of_device_is_compatible(np, "qcom,sm8150-smmu-500") ||
 	    of_device_is_compatible(np, "qcom,sm8250-smmu-500"))
 		return qcom_smmu_impl_init(smmu);
+
+	if (of_device_is_compatible(smmu->dev->of_node, "qcom,adreno-smmu"))
+		return qcom_adreno_smmu_impl_init(smmu);
 
 	if (of_device_is_compatible(np, "marvell,ap806-smmu-500"))
 		smmu->impl = &mrvl_mmu500_impl;

@@ -865,22 +865,22 @@ static int bpf_map__init_kern_struct_ops(struct bpf_map *map,
 		if (btf_is_ptr(mtype)) {
 			struct bpf_program *prog;
 
-			mtype = skip_mods_and_typedefs(btf, mtype->type, &mtype_id);
+			prog = st_ops->progs[i];
+			if (!prog)
+				continue;
+
 			kern_mtype = skip_mods_and_typedefs(kern_btf,
 							    kern_mtype->type,
 							    &kern_mtype_id);
-			if (!btf_is_func_proto(mtype) ||
-			    !btf_is_func_proto(kern_mtype)) {
-				pr_warn("struct_ops init_kern %s: non func ptr %s is not supported\n",
+
+			/* mtype->type must be a func_proto which was
+			 * guaranteed in bpf_object__collect_st_ops_relos(),
+			 * so only check kern_mtype for func_proto here.
+			 */
+			if (!btf_is_func_proto(kern_mtype)) {
+				pr_warn("struct_ops init_kern %s: kernel member %s is not a func ptr\n",
 					map->name, mname);
 				return -ENOTSUP;
-			}
-
-			prog = st_ops->progs[i];
-			if (!prog) {
-				pr_debug("struct_ops init_kern %s: func ptr %s is not set\n",
-					 map->name, mname);
-				continue;
 			}
 
 			prog->attach_btf_id = kern_type_id;
@@ -1162,7 +1162,8 @@ static int bpf_object__elf_init(struct bpf_object *obj)
 	if (!elf_rawdata(elf_getscn(obj->efile.elf, obj->efile.shstrndx), NULL)) {
 		pr_warn("elf: failed to get section names strings from %s: %s\n",
 			obj->path, elf_errmsg(-1));
-		return -LIBBPF_ERRNO__FORMAT;
+		err = -LIBBPF_ERRNO__FORMAT;
+		goto errout;
 	}
 
 	/* Old LLVM set e_machine to EM_NONE */
@@ -4122,6 +4123,7 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map)
 {
 	struct bpf_create_map_attr create_attr;
 	struct bpf_map_def *def = &map->def;
+	int err = 0;
 
 	memset(&create_attr, 0, sizeof(create_attr));
 
@@ -4164,8 +4166,6 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map)
 
 	if (bpf_map_type__is_map_in_map(def->type)) {
 		if (map->inner_map) {
-			int err;
-
 			err = bpf_object__create_map(obj, map->inner_map);
 			if (err) {
 				pr_warn("map '%s': failed to create inner map: %d\n",
@@ -4182,8 +4182,8 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map)
 	if (map->fd < 0 && (create_attr.btf_key_type_id ||
 			    create_attr.btf_value_type_id)) {
 		char *cp, errmsg[STRERR_BUFSIZE];
-		int err = -errno;
 
+		err = -errno;
 		cp = libbpf_strerror_r(err, errmsg, sizeof(errmsg));
 		pr_warn("Error in bpf_create_map_xattr(%s):%s(%d). Retrying without BTF.\n",
 			map->name, cp, err);
@@ -4195,15 +4195,14 @@ static int bpf_object__create_map(struct bpf_object *obj, struct bpf_map *map)
 		map->fd = bpf_create_map_xattr(&create_attr);
 	}
 
-	if (map->fd < 0)
-		return -errno;
+	err = map->fd < 0 ? -errno : 0;
 
 	if (bpf_map_type__is_map_in_map(def->type) && map->inner_map) {
 		bpf_map__destroy(map->inner_map);
 		zfree(&map->inner_map);
 	}
 
-	return 0;
+	return err;
 }
 
 static int init_map_slots(struct bpf_map *map)
@@ -6906,8 +6905,10 @@ __bpf_object__open(const char *path, const void *obj_buf, size_t obj_buf_sz,
 	kconfig = OPTS_GET(opts, kconfig, NULL);
 	if (kconfig) {
 		obj->kconfig = strdup(kconfig);
-		if (!obj->kconfig)
-			return ERR_PTR(-ENOMEM);
+		if (!obj->kconfig) {
+			err = -ENOMEM;
+			goto out;
+		}
 	}
 
 	err = bpf_object__elf_init(obj);
@@ -7649,6 +7650,16 @@ bool bpf_map__is_pinned(const struct bpf_map *map)
 	return map->pinned;
 }
 
+static void sanitize_pin_path(char *s)
+{
+	/* bpffs disallows periods in path names */
+	while (*s) {
+		if (*s == '.')
+			*s = '_';
+		s++;
+	}
+}
+
 int bpf_object__pin_maps(struct bpf_object *obj, const char *path)
 {
 	struct bpf_map *map;
@@ -7678,6 +7689,7 @@ int bpf_object__pin_maps(struct bpf_object *obj, const char *path)
 				err = -ENAMETOOLONG;
 				goto err_unpin_maps;
 			}
+			sanitize_pin_path(buf);
 			pin_path = buf;
 		} else if (!map->pin_path) {
 			continue;
@@ -7722,6 +7734,7 @@ int bpf_object__unpin_maps(struct bpf_object *obj, const char *path)
 				return -EINVAL;
 			else if (len >= PATH_MAX)
 				return -ENAMETOOLONG;
+			sanitize_pin_path(buf);
 			pin_path = buf;
 		} else if (!map->pin_path) {
 			continue;
